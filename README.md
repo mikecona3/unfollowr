@@ -1,43 +1,31 @@
 # Unfollower Tracker
 
-Tracks who unfollows you on X (Twitter) and/or your Instagram
-follower count over time. Choose either platform, or both, per run.
-
-## Important: X vs. Instagram are not equivalent
-
-Getting actual Instagram follower *usernames* would require unofficial
-private-API libraries (e.g. `instagrapi`) or browser automation, both of
-which violate Instagram's Terms of Service and risk the account being
-rate-limited or banned. This project intentionally does not do that — it
-only uses Meta's sanctioned Graph API, which caps what's available to
-count-level tracking.
+Tracks who unfollows you on X (Twitter), and lets you unfollow them back
+from a simple desktop app.
 
 ## How it works
 
-Each run, per selected platform:
+Each check:
 
-1. Fetches current data (follower list for X, follower count for
-   Instagram) from the platform's official API.
-2. Compares it to a local JSON snapshot saved from the previous run
-   (`x_snapshot.json` / `instagram_snapshot.json`).
-3. For X: anyone in the old snapshot but missing now is logged as an
-   unfollower.
-   For Instagram: the numeric change in follower count is logged.
-4. Appends the results to a Google Sheet (X and Instagram get separate
-   tabs in the same spreadsheet), or prints them if Sheets isn't
-   configured.
-5. Saves current data as the new snapshot.
+1. Fetches the signed-in account's current follower list from the
+   official X API.
+2. Compares it to a local JSON snapshot saved from the previous check
+   (`x_snapshot.json`).
+3. Anyone in the old snapshot but missing now is logged as an unfollower.
+4. Appends new unfollowers to a Google Sheet, or prints them if Sheets
+   isn't configured.
+5. Saves the current follower list as the new snapshot.
 
-**The first run per platform only establishes a baseline** — nothing is
-reported as changed until the second run.
+**The first check only establishes a baseline.** Unfollowers start showing
+up from the second check.
 
 ## Requirements
 
 - Python 3.9+
-- **For X**: a developer account with at least **Basic-tier** API access
+- An X developer account with at least **Basic-tier** API access
   (the free tier doesn't expose the followers endpoint at usable limits).
-- **For Instagram**: a Business or Creator account connected to a Facebook
-  Page, and a Graph API access token with `instagram_basic` permission.
+  Only whoever sets the app up needs this. People using the app just sign
+  in with their normal X account.
 - **For Sheets export** (optional): a Google Cloud service account with the
   Sheets and Drive APIs enabled.
 
@@ -45,26 +33,33 @@ reported as changed until the second run.
 
 ### 1. Install dependencies
 
-bash
+```bash
 pip install -r requirements.txt
+```
 
-### 2. X API credentials (skip if you only want Instagram)
+### 2. X app keys (one-time, by whoever sets the app up)
 
 1. Create a project/app at [developer.x.com](https://developer.x.com).
-2. Generate a Bearer Token.
-3. Find your numeric user ID (or just use your @handle).
+2. In the app's **User authentication settings**:
+   - App permissions: **Read and write**
+   - Type of app: **Native App**
+   - Callback URI / Website URL: any valid URL (e.g. your website). The app
+     signs in with a PIN, so the callback isn't used.
+3. Under **Keys and tokens**, copy the **API Key** and **API Key Secret**
+   into `x_app_keys.json` next to the code:
 
-### 3. Instagram API credentials (skip if you only want X)
+   ```json
+   {
+     "api_key": "your-api-key",
+     "api_secret": "your-api-key-secret"
+   }
+   ```
 
-1. Convert your Instagram account to a Business or Creator account and
-   connect it to a Facebook Page (required by Meta for API access).
-2. Create an app at [developers.facebook.com](https://developers.facebook.com).
-3. Generate a long-lived Graph API access token with the
-   `instagram_basic` permission for that account.
-4. Find your Instagram Business Account ID (available via the Graph API
-   Explorer or your Facebook Page's connected-account settings).
+   These identify the app, not any user. Don't publish this file (it's
+   listed in `.gitignore`). `X_API_KEY` / `X_API_SECRET` environment
+   variables override it if set.
 
-### 4. Google Sheets credentials (optional but recommended)
+### 3. Google Sheets credentials (optional)
 
 1. Create a service account in [Google Cloud Console](https://console.cloud.google.com/).
 2. Enable the **Google Sheets API** and **Google Drive API**.
@@ -74,44 +69,62 @@ pip install -r requirements.txt
 5. Copy the spreadsheet ID from its URL:
    `https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit`
 
-### 5. Environment variables
+### 4. Optional environment variables
 
-bash
-# X (Twitter) — omit if not tracking X
-export X_BEARER_TOKEN="your-bearer-token"
-export X_USER_ID="your-numeric-user-id"      # or use X_USERNAME instead
-# export X_USERNAME="your_handle"
+```bash
+# Google Sheets — omit to just print results instead
+# export GOOGLE_SERVICE_ACCOUNT_FILE="/path/to/service_account.json"
+# export GOOGLE_SHEET_ID="your-spreadsheet-id"
+# export GOOGLE_SHEET_TAB_X="X Unfollowers"   # optional
 
-# Instagram — omit if not tracking Instagram
-export IG_ACCESS_TOKEN="your-graph-api-token"
-export IG_BUSINESS_ACCOUNT_ID="your-ig-business-account-id"
-
-# Google Sheets — omit to just print results to the console instead
-export GOOGLE_SERVICE_ACCOUNT_FILE="/path/to/service_account.json"
-export GOOGLE_SHEET_ID="your-spreadsheet-id"
-# export GOOGLE_SHEET_TAB_X="X Unfollowers"                    # optional
-# export GOOGLE_SHEET_TAB_INSTAGRAM="Instagram Follower Counts" # optional
-
-# Optional: where local snapshot files are stored (defaults to cwd)
-# export SNAPSHOT_DIR="/path/to/data"
+# Where the login, snapshots and saved lists are stored (default: ~/.unfollowr)
+# export UNFOLLOWR_DATA_DIR="/path/to/data"
+```
 
 ## Usage
 
-bash
-python -m unfollower_tracker --platform x            # X only
-python -m unfollower_tracker --platform instagram     # Instagram only
-python -m unfollower_tracker --platform both          # both (default)
-python -m unfollower_tracker                          # same as --platform both
+### Desktop app
 
-Run it again later (next day, next week, whatever cadence) to see changes show up.
+```bash
+python -m unfollower_tracker.gui
+```
+
+1. Press **Sign in with X**. X's login page opens in your browser. Log in
+   there (the app never sees your password) and click **Authorize app**.
+2. X shows a PIN. Type it into the app.
+3. Press **Find Unfollowers on X**.
+
+The login is saved, so you stay signed in next time you open the app. Use
+**Sign Out** to disconnect or switch accounts. Each account keeps its own
+snapshot and saved list in `~/.unfollowr/<account id>/`.
+
+Unfollowers are kept on a saved list (`x_unfollowers.json`). It loads when
+the app opens, and each check adds new unfollowers to it. Anyone who
+follows you again drops off automatically.
+Select accounts (or **Select All**), then either:
+
+- **Unfollow Selected**: unfollows them on X and removes them from the list.
+  The app asks for confirmation first.
+- **Remove from List**: removes them from the list without unfollowing.
+
+X allows about 50 unfollows per 15 minutes. Past that, the app pauses
+until the limit resets.
+
+### Command line
+
+```bash
+python -m unfollower_tracker
+```
+
+Runs one check for the account signed in through the app and prints the
+results. Handy for scheduling with cron.
 
 ## Notes & limitations
 
 - X API rate limits apply for large follower counts; `wait_on_rate_limit=True`
   handles this automatically but large accounts may take a while.
-- Both platforms only detect changes between runs — someone who follows
-  and unfollows between two runs won't be caught.
-- Instagram results are currently exporting counts only.
+- Changes are only detected between checks — someone who follows and
+  unfollows between two checks won't be caught.
 
 ## License
 

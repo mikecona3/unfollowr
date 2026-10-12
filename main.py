@@ -2,89 +2,91 @@
 """
 Unfollower Tracker
 ==================
-Tracks who unfollows you on X, and/or your Instagram follower count over
-time. See README.md for full setup instructions.
+Tracks who unfollows you on X. See README.md for full setup instructions.
 
 Usage:
-    python -m unfollower_tracker --platform x
-    python -m unfollower_tracker --platform instagram
-    python -m unfollower_tracker --platform both
+    python -m unfollower_tracker        # command line
+    python -m unfollower_tracker.gui    # desktop app
 """
 
 import argparse
 import sys
 
+from . import auth, unfollower_list
 from .config import ConfigError
-from .sheets_export import export_instagram_rows, export_x_rows
+from .sheets_export import export_x_rows
 
 
-def run_x() -> None:
+def run_x(login: dict) -> list:
+    """
+    Check the signed-in account for unfollowers. Returns the full saved
+    unfollower list (new ones plus any left over from earlier checks) as
+    [{"user_id", "username", ...}].
+    """
     from .providers import x_provider
 
-    print("=== X (Twitter) ===")
+    print(f"=== X (@{login['username']}) ===")
     try:
-        result = x_provider.run()
+        result = x_provider.run(login)
     except ConfigError as e:
-        print(f"Skipping X: {e}")
-        return
+        print(f"Can't check X: {e}")
+        return unfollower_list.load(login["user_id"])
 
     print(f"Current followers: {result['follower_count']}")
     if result["first_run"]:
         print("No previous snapshot found — baseline saved. "
               "Run again later to detect unfollowers.")
-        return
-
-    if not result["unfollowers"]:
-        print("No unfollowers detected since last run.")
+    elif not result["unfollowers"]:
+        print("No new unfollowers since last run.")
     else:
-        print(f"Detected {len(result['unfollowers'])} unfollower(s):")
+        print(f"Detected {len(result['unfollowers'])} new unfollower(s):")
         for u in result["unfollowers"]:
             print(f"  - @{u['username']} (id: {u['user_id']})")
         export_x_rows(result["sheet_rows"])
 
+    saved = result["saved_unfollowers"]
+    if saved:
+        print(f"{len(saved)} account(s) on your saved unfollower list.")
+    return saved
 
-def run_instagram() -> None:
-    from .providers import instagram_provider
 
-    print("=== Instagram ===")
-    print("Note: Instagram's official API only exposes follower COUNTS, "
-          "not who specifically unfollowed you.")
+def unfollow_x(login: dict, users: list) -> list:
+    """Unfollow each user from the signed-in account. Returns the ones successfully unfollowed."""
+    import tweepy
+    from .providers import x_provider
+
     try:
-        result = instagram_provider.run()
+        client = auth.get_client(login)
     except ConfigError as e:
-        print(f"Skipping Instagram: {e}")
-        return
+        print(f"Can't unfollow: {e}")
+        return []
 
-    print(f"Current follower count: {result['follower_count']}")
-    if result["first_run"]:
-        print("No previous snapshot found — baseline saved. "
-              "Run again later to see the change over time.")
-        return
+    if len(users) > 50:
+        print("X allows about 50 unfollows per 15 minutes — "
+              "this will pause automatically when the limit is hit.")
 
-    delta = result["delta"]
-    if delta == 0:
-        print("No change in follower count since last run.")
-    elif delta > 0:
-        print(f"Gained {delta} follower(s) since last run.")
-    else:
-        print(f"Lost {abs(delta)} follower(s) since last run.")
-    export_instagram_rows(result["sheet_rows"])
+    done = []
+    for u in users:
+        try:
+            x_provider.unfollow(client, u["user_id"])
+        except tweepy.TweepyException as e:
+            print(f"  Could not unfollow @{u['username']}: {e}")
+            continue
+        print(f"  Unfollowed @{u['username']}")
+        done.append(u)
+    unfollower_list.remove(login["user_id"], (u["user_id"] for u in done))
+    print(f"Unfollowed {len(done)} of {len(users)} account(s).")
+    return done
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Track unfollowers on X and/or Instagram.")
-    parser.add_argument(
-        "--platform",
-        choices=["x", "instagram", "both"],
-        default="both",
-        help="Which platform(s) to check (default: both).",
-    )
-    args = parser.parse_args()
-
-    if args.platform in ("x", "both"):
-        run_x()
-    if args.platform in ("instagram", "both"):
-        run_instagram()
+    argparse.ArgumentParser(description="Track unfollowers on X.").parse_args()
+    login = auth.load_login()
+    if not login:
+        print("Not signed in. Open the app (python -m unfollower_tracker.gui) "
+              "and use Sign in with X first.")
+        sys.exit(1)
+    run_x(login)
 
 
 if __name__ == "__main__":

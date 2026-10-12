@@ -1,6 +1,6 @@
 """
-Shared Google Sheets export helper. Each platform writes to its own tab
-in the same spreadsheet so both can be tracked side by side.
+Google Sheets export helper. Appends X unfollowers to a tab in your
+spreadsheet.
 """
 
 from .config import config
@@ -43,19 +43,3 @@ def export_x_rows(rows: list) -> None:
     ws.append_rows(rows, value_input_option="USER_ENTERED")
     print(f"Appended {len(rows)} X unfollower(s) to Google Sheet.")
 
-
-def export_instagram_rows(rows: list) -> None:
-    if not rows:
-        return
-    if not config.google_sheet_id:
-        print("GOOGLE_SHEET_ID not set — skipping Sheets export. Instagram count rows:")
-        for r in rows:
-            print("  ", r)
-        return
-
-    ws = _get_worksheet(
-        config.google_sheet_tab_instagram,
-        ["Checked At (UTC)", "Follower Count", "Change Since Last Run"],
-    )
-    ws.append_rows(rows, value_input_option="USER_ENTERED")
-    print(f"Appended {len(rows)} Instagram follower-count row(s) to Google Sheet.")

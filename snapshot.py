@@ -1,6 +1,5 @@
 """
-Generic JSON snapshot storage, namespaced per platform so X and Instagram
-never clobber each other's saved state.
+Generic JSON snapshot storage, namespaced per platform (currently just X).
 """
 
 import json
